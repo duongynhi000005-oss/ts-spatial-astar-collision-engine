@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>TypeScript 2D/3D Spatial Hash & Multilayer A* Autorouter Interactive Visualizer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 32px;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    h1 { margin: 0 0 6px; font-size: 22px; color: #38bdf8; }
+    .sub { color: #94a3b8; font-size: 13.5px; margin-bottom: 18px; }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      align-items: center;
+    }
+    button {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.green { background: #059669; }
+    button.amber { background: #d97706; }
+    .panel {
+      display: grid;
+      grid-template-columns: 660px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    svg {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      cursor: crosshair;
+    }
+    .stats {
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 18px;
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <h1>⚡ TypeScript 2D/3D Spatial Hash & Multilayer A* Pathfinder — Interactive Playground</h1>
+  <div class="sub">Click anywhere on the grid to toggle Layer-0 keepout obstacles. When Layer 0 is blocked, the router automatically transitions through a Via to Layer 1!</div>
+
+  <div class="toolbar">
+    <button class="green" onclick="loadPreset('via_bridge')">Preset 1: Full Layer-0 Wall (Auto Via Jump to Layer 1)</button>
+    <button onclick="loadPreset('maze')">Preset 2: High-Density Multi-Obstacle Maze</button>
+    <button class="amber" onclick="clearObstacles()">Clear All Obstacles</button>
+  </div>
+
+  <div class="panel">
+    <svg id="board" width="640" height="420" viewBox="0 0 640 420"></svg>
+    <div class="stats">
+      <h3 style="margin-top:0;color:#38bdf8;">Live Routing Telemetry</h3>
+      <div id="telemetry">Initializing...</div>
+      <hr style="border:none;border-top:1px solid #1e293b;margin:14px 0;" />
+      <div><span class="badge" style="background:#ef4444;color:#fff;">Red Trace</span> Layer 0 (Top Copper / Primary Plane)</div>
+      <div style="margin-top:6px;"><span class="badge" style="background:#38bdf8;color:#082f49;">Cyan Dashed</span> Layer 1 (Bottom Copper / Secondary Plane)</div>
+      <div style="margin-top:6px;"><span class="badge" style="background:#f59e0b;color:#451a03;">Gold Ring</span> Plated Through-Hole Via Transition</div>
+    </div>
+  </div>
+
+  <script>
+    const svg = document.getElementById('board');
+    const STEP = 20;
+    const COLS = 32;
+    const ROWS = 21;
+    const start = { x: 3, y: 10, layer: 0 };
+    const goal = { x: 28, y: 10, layer: 0 };
+    let obstacles = new Set();
+
+    function key(x, y, l) { return `${x},${y},${l}`; }
+
+    function solveAStar() {
+      const t0 = performance.now();
+      const viaCost = 3.2;
+      const open = [{ ...start, g: 0, f: 0, k: key(start.x, start.y, start.layer) }];
+      const gMap = new Map([[key(start.x, start.y, start.layer), 0]]);
+      const parent = new Map();
+      const nodeByKey = new Map([[key(start.x, start.y, start.layer), start]]);
+      const goalK = key(goal.x, goal.y, goal.layer);
+      let visited = 0;
+
+      while (open.length) {
+        open.sort((a, b) => a.f - b.f);
+        const cur = open.shift();
+        visited++;
+        if (cur.k === goalK) {
+          const path = [];
+          let ck = goalK;
+          while (ck) {
+            path.push(nodeByKey.get(ck));
+            ck = parent.get(ck);
+          }
+          path.reverse();
+          return { ok: true, path, visited, cost: cur.g, ms: (performance.now() - t0).toFixed(2) };
+        }
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [dx, dy] of dirs) {
+          const nx = cur.x + dx, ny = cur.y + dy, nl = cur.layer;
+          if (nx < 1 || nx >= COLS - 1 || ny < 1 || ny >= ROWS - 1) continue;
+          if (obstacles.has(key(nx, ny, nl))) continue;
+          const nk = key(nx, ny, nl);
+          const ng = cur.g + 1;
+          if (ng < (gMap.get(nk) ?? 1e9)) {
+            gMap.set(nk, ng);
+            parent.set(nk, cur.k);
+            const nn = { x: nx, y: ny, layer: nl };
+            nodeByKey.set(nk, nn);
+            const h = Math.abs(nx - goal.x) + Math.abs(ny - goal.y) + (nl === goal.layer ? 0 : viaCost);
+            open.push({ ...nn, g: ng, f: ng + h, k: nk });
+          }
+        }
+        const otherLayer = cur.layer === 0 ? 1 : 0;
+        if (!obstacles.has(key(cur.x, cur.y, otherLayer))) {
+          const nk = key(cur.x, cur.y, otherLayer);
+          const ng = cur.g + viaCost;
+          if (ng < (gMap.get(nk) ?? 1e9)) {
+            gMap.set(nk, ng);
+            parent.set(nk, cur.k);
+            const nn = { x: cur.x, y: cur.y, layer: otherLayer };
+            nodeByKey.set(nk, nn);
+            const h = Math.abs(cur.x - goal.x) + Math.abs(cur.y - goal.y) + (otherLayer === goal.layer ? 0 : viaCost);
+            open.push({ ...nn, g: ng, f: ng + h, k: nk });
+          }
+        }
+      }
+      return { ok: false, path: [], visited, cost: Infinity, ms: (performance.now() - t0).toFixed(2) };
+    }
+
+    function render() {
+      const res = solveAStar();
+      let html = '';
+      for (let x = 0; x < COLS; x++) {
+        for (let y = 0; y < ROWS; y++) {
+          html += `<circle cx="${x*STEP}" cy="${y*STEP}" r="1.2" fill="#1e293b" />`;
+        }
+      }
+      for (const item of obstacles) {
+        const [ox, oy] = item.split(',').map(Number);
+        html += `<rect x="${ox*STEP - 9}" y="${oy*STEP - 9}" width="18" height="18" rx="3" fill="#334155" stroke="#64748b" />`;
+      }
+      let vias = 0;
+      for (let i = 1; i < res.path.length; i++) {
+        const a = res.path[i - 1], b = res.path[i];
+        if (a.layer !== b.layer) {
+          vias++;
+          html += `<circle cx="${a.x*STEP}" cy="${a.y*STEP}" r="6" fill="#090d16" stroke="#f59e0b" stroke-width="3" />`;
+        } else {
+          const color = a.layer === 0 ? '#ef4444' : '#38bdf8';
+          const dash = a.layer === 1 ? 'stroke-dasharray="5,4"' : '';
+          html += `<line x1="${a.x*STEP}" y1="${a.y*STEP}" x2="${b.x*STEP}" y2="${b.y*STEP}" stroke="${color}" stroke-width="4" stroke-linecap="round" ${dash} />`;
+        }
+      }
+      html += `<circle cx="${start.x*STEP}" cy="${start.y*STEP}" r="7" fill="#10b981" />`;
+      html += `<circle cx="${goal.x*STEP}" cy="${goal.y*STEP}" r="7" fill="#10b981" />`;
+      svg.innerHTML = html;
+
+      document.getElementById('telemetry').innerHTML = `
+        <div><strong>Status:</strong> ${res.ok ? '<span style="color:#10b981">ROUTED OK</span>' : '<span style="color:#ef4444">NO PATH</span>'}</div>
+        <div><strong>Solve Time:</strong> ${res.ms} ms</div>
+        <div><strong>Nodes Expanded:</strong> ${res.visited}</div>
+        <div><strong>Via Transitions:</strong> ${vias}</div>
+        <div><strong>Total Weighted Cost:</strong> ${res.ok ? res.cost.toFixed(1) : 'N/A'}</div>
+      `;
+    }
+
+    svg.addEventListener('click', (e) => {
+      const rect = svg.getBoundingClientRect();
+      const gx = Math.round((e.clientX - rect.left) / STEP);
+      const gy = Math.round((e.clientY - rect.top) / STEP);
+      const k = key(gx, gy, 0);
+      if (obstacles.has(k)) obstacles.delete(k);
+      else obstacles.add(k);
+      render();
+    });
+
+    function clearObstacles() { obstacles.clear(); render(); }
+
+    function loadPreset(name) {
+      obstacles.clear();
+      if (name === 'via_bridge') {
+        for (let y = 1; y < ROWS - 1; y++) obstacles.add(key(15, y, 0));
+      } else if (name === 'maze') {
+        for (let y = 3; y <= 17; y++) obstacles.add(key(10, y, 0));
+        for (let y = 1; y <= 14; y++) obstacles.add(key(19, y, 0));
+      }
+      render();
+    }
+
+    loadPreset('via_bridge');
+  </script>
+</body>
+</html>
