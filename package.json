@@ -1,0 +1,23 @@
+{
+  "name": "ts-spatial-astar-collision-engine",
+  "version": "1.0.0",
+  "description": "Zero-dependency TypeScript 2D/3D Spatial Indexing (Spatial Hash + AABB Tree), Capsule/Segment Collision Detection, and Multilayer Obstacle-Aware A* Pathfinding Engine",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "bun test"
+  },
+  "keywords": [
+    "spatial-index",
+    "r-tree",
+    "spatial-hash",
+    "astar",
+    "pathfinding",
+    "collision-detection",
+    "eda",
+    "cad",
+    "autorouter",
+    "typescript"
+  ],
+  "license": "MIT"
+}
